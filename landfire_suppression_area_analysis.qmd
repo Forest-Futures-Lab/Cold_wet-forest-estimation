@@ -1,0 +1,137 @@
+---
+title: "Landfire_suppression_analysis"
+author: "Winslow Hansen"
+format: html
+editor: visual
+---
+
+## 
+
+# Data download section
+
+We start by reading in packages needed for the analysis
+
+```{r}
+library(rlandfire)
+library(terra)
+library(sf)
+library(tidyverse)
+
+```
+
+Set parameters for whether we run the script for all western US forests or just a subset and at what cell size
+
+```{r}
+data.directory = "D:/workspace/Winslow/landfire_supression_area_analysis/data/"
+pixel.size=30
+domain="whole" #Alternative is whole or State
+State= "all" #If domain set to whole then not needed.
+```
+
+# Analysis section
+
+Then we will conduct the analysis. The workflow for the analysis is as follows:
+
+1.  We first use the EVT 2022 layer to filter to cells dominated by deciduous/evergreen/mixed vegetation and is dominated by Trees
+2.  We then use 2020 BPS layer to filter the forest cells in fire regime group (4A, 4B, 5A, or 5B) and fire return interval is longer than 80 years.
+    -   Group IV-A Percent replacement fire greater than 80%, fire return interval 36-100 years
+    -   Group IV-B Percent replacement fire greater than 66.7%, fire return interval 101-200 years
+    -   Group V-A Any severity, fire return interval 201-500 years
+    -   Group V-B Any severity, fire return interval 501 or more years
+3.  Then we use the 2022 Vegetation condition class layer to find the remaining cells that are group 1A or 1B, which are both low departure (vegetation departure of less than 33%).
+    -   The Vegetation Condition Class (VCC) data layer categorizes departure between current vegetation conditions and reference vegetation conditions similar to the methods outlined in the Interagency Fire Regime Condition Class Guidebook.
+        -   Vegetation Condition Class I.A Very Low, Vegetation Departure 0-16%
+        -   Vegetation Condition Class I.B Low to Moderate, Vegetation Departure 17-33%
+
+Prepare the csv list of vegetation types
+
+```{r}
+veg.code=read.csv(paste0(data.directory,"LF23_EVT_240.csv"))
+
+veg.code.forest=veg.code %>%filter(EVT_LF=="Tree" & EVT_PHYS=="Conifer"|EVT_PHYS=="Conifer-Hardwood"|EVT_PHYS=="Hardwood")
+write.csv(veg.code.forest, paste0(data.directory,"veg.code.forest.csv"))
+
+veg.code.nonforest= veg.code %>% filter(!VALUE %in% as.vector(veg.code.forest$VALUE))
+
+veg.code.nonforest = veg.code.nonforest %>% mutate(v = NA)
+
+```
+
+Read in netcdfs from script 1
+
+```{r}
+US_230EVT = rast(paste0(data.directory,"domain-",domain,"_State-",State,"_Pixel.size-",pixel.size,"_EVT.nc"))
+
+US_200BPS = rast(paste0(data.directory,"domain-",domain,"_State-",State,"_Pixel.size-",pixel.size,"_BPS.nc"))
+
+US_230VCC = rast(paste0(data.directory,"domain-",domain,"_State-",State,"_Pixel.size-",pixel.size,"_VCC.nc"))
+
+```
+
+1.  We use the EVT 2022 layer to filter to cells dominated by deciduous/evergreen/mixed forest.
+    -   This is done by taking the nonforest codes from above and substituting NA for those values.
+
+```{r}
+lf.filtered = subst(US_230EVT,as.vector(veg.code.nonforest$VALUE),as.vector(veg.code.nonforest$v),datatype="INT2S",raw=T)
+
+writeCDF(lf.filtered, paste0(data.directory,"forested.gridcells.nc"))
+
+```
+
+Prepare the csv list of biophysical setting types
+
+```{r}
+bps.code=read.csv(paste0(data.directory,"LF16_BPS_200.csv"))
+
+
+bps.code.longI=bps.code %>%filter( FRI_ALLFIR>=80 & FRG_NEW=="IV-A"|FRG_NEW=="IV-B"|FRG_NEW=="V-A"|FRG_NEW=="V-B" )
+
+
+bps.code.longI.forest=bps.code.longI %>%filter( GROUPVEG=="Conifer"|GROUPVEG=="Conifer-Hardwood"|GROUPVEG=="Hardwood")
+write.csv(bps.code.longI.forest, paste0(data.directory,"bps.code.longI.forest.csv" ))
+
+bps.code.longI.nonforest= bps.code %>% filter(!VALUE %in% as.vector(bps.code.longI.forest$VALUE))
+
+bps.code.longI.nonforest = bps.code.longI.nonforest %>% mutate(v = NA)
+```
+
+2.  We then use 2020 BPS layer to filter the forest cells in fire regime group (4A, 4B, 5A, or 5B) and fire return interval is longer than 80 years.
+
+    ```{r}
+    bps.filtered = subst(US_200BPS ,as.vector(bps.code.longI.nonforest$VALUE),as.vector(bps.code.longI.nonforest$v),datatype="INT2S",raw=T)
+    long.interval.veg= ifel(!is.na(bps.filtered), lf.filtered, NA)
+    writeCDF(long.interval.veg, paste0(data.directory,"long.interval.forested.gridcells.nc"))
+
+    ```
+
+3.  Then we use the 2022 Vegetation condition class layer to find the remaining cells that are group 1A or 1B, which are both low departure (vegetation departure of less than 33%).
+
+```{r}
+vcc.filtered=ifel(US_230VCC==1|US_230VCC==2,1,NA)
+long.interval.veg.final=ifel(!is.na(vcc.filtered),long.interval.veg,NA)
+writeCDF(long.interval.veg.final, paste0(data.directory,"long.interval.forested.gridcells.low.departure.nc"))
+```
+
+Finally we calculate area and percentage that experiences long-interval stand replacing fire
+
+```{r}
+
+#Forested area according to landfire
+lf.filtered = rast(paste0(data.directory,"forested.gridcells.nc"))
+t=cells(lf.filtered)
+
+
+#Forested area that is low departure from historical settings and that experienced long interval stand replacing fire
+long.interval.veg = rast(paste0(data.directory,"long.interval.forested.gridcells.low.departure.nc"))
+s=cells(long.interval.veg)
+
+#Statistics
+#area is low departure from historical settings and that experienced long interval stand replacing fire
+long.interval.veg.area= length(s) *pixel.size^2/  1000000
+total.forest.area= length(t) *pixel.size^2/  1000000
+
+print(paste0("area is low departure from historical settings and that experienced long interval stand replacing fire is ", long.interval.veg.area, " km^2"))
+print(paste0("Area of total forest is ", total.forest.area, " km^2"))
+
+print(paste0("Percent forested area where suppression may be appropriate is ", round(long.interval.veg.area/total.forest.area*100,digits=2)," %"))
+```
