@@ -84,8 +84,8 @@ Prepare the csv list of biophysical setting types
 bps.code=read.csv(paste0(data.directory,"LF16_BPS_200.csv"))
 
 
-bps.code.longI=bps.code %>%filter( FRI_ALLFIR>=80 & FRG_NEW=="IV-A"|FRG_NEW=="IV-B"|FRG_NEW=="V-A"|FRG_NEW=="V-B" )
-
+bps.code.longI=bps.code %>%filter( FRI_ALLFIR>=80  & FRG_NEW=="IV-A"|FRG_NEW=="IV-B"|FRG_NEW=="V-A"|FRG_NEW=="V-B" )
+bps.code.longI = bps.code.longI %>% filter(PRC_REPLAC>=80)
 
 bps.code.longI.forest=bps.code.longI %>%filter( GROUPVEG=="Conifer"|GROUPVEG=="Conifer-Hardwood"|GROUPVEG=="Hardwood")
 write.csv(bps.code.longI.forest, paste0(data.directory,"bps.code.longI.forest.csv" ))
@@ -100,16 +100,16 @@ bps.code.longI.nonforest = bps.code.longI.nonforest %>% mutate(v = NA)
     ```{r}
     bps.filtered = subst(US_200BPS ,as.vector(bps.code.longI.nonforest$VALUE),as.vector(bps.code.longI.nonforest$v),datatype="INT2S",raw=T)
     long.interval.veg= ifel(!is.na(bps.filtered), lf.filtered, NA)
-    writeCDF(long.interval.veg, paste0(data.directory,"long.interval.forested.gridcells.nc"))
+    writeCDF(long.interval.veg, paste0(data.directory,"long.interval.forested.gridcells_SR.nc"))
 
     ```
 
 3.  Then we use the 2022 Vegetation condition class layer to find the remaining cells that are group 1A or 1B, which are both low departure (vegetation departure of less than 33%).
 
 ```{r}
-vcc.filtered=ifel(US_230VCC==1|US_230VCC==2,1,NA)
+vcc.filtered=ifel(US_230VCC==1|US_230VCC==2|US_230VCC==3 |US_230VCC==4,1,NA)
 long.interval.veg.final=ifel(!is.na(vcc.filtered),long.interval.veg,NA)
-writeCDF(long.interval.veg.final, paste0(data.directory,"long.interval.forested.gridcells.low.departure.nc"))
+writeCDF(long.interval.veg.final, paste0(data.directory,"long.interval.forested.gridcells.low.mod.departure.nc"))
 ```
 
 Finally we calculate area and percentage that experiences long-interval stand replacing fire
@@ -122,7 +122,7 @@ t=cells(lf.filtered)
 
 
 #Forested area that is low departure from historical settings and that experienced long interval stand replacing fire
-long.interval.veg = rast(paste0(data.directory,"long.interval.forested.gridcells.low.departure.nc"))
+long.interval.veg = rast(paste0(data.directory,"long.interval.forested.gridcells.low.mod.departure.nc"))
 s=cells(long.interval.veg)
 
 #Statistics
